@@ -477,6 +477,7 @@ let timerId=null;
 let secondsLeft=0;
 let trainingActive=false;
 let rewardOpen=false;
+let lastTaskKey='';
 
 const $=id=>document.getElementById(id);
 const API='https://www.thesportsdb.com/api/v1/json/123/searchplayers.php?p=';
@@ -540,42 +541,49 @@ function newTask(){
 
   attemptsForTask=0;
   $('rewardText').textContent='';
-  currentTaskType=pickTaskType();
-  setAnswerMode(currentTaskType);
 
-  let a,b,symbol='';
+  let a,b,symbol='',taskKey='',tries=0;
 
-  if(currentTaskType==='mul'){
-    a=r(1,10); b=r(1,10);
-    currentAnswer=a*b; currentRemainder=0; symbol='×';
-  }
+  do{
+    currentTaskType=pickTaskType();
+    setAnswerMode(currentTaskType);
 
-  if(currentTaskType==='add'){
-    a=r(0,100); b=r(0,100-a);
-    currentAnswer=a+b; currentRemainder=0; symbol='+';
-  }
+    if(currentTaskType==='mul'){
+      a=r(1,10); b=r(1,10);
+      currentAnswer=a*b; currentRemainder=0; symbol='×';
+    }
 
-  if(currentTaskType==='sub'){
-    a=r(0,100); b=r(0,a);
-    currentAnswer=a-b; currentRemainder=0; symbol='−';
-  }
+    if(currentTaskType==='add'){
+      a=r(0,100); b=r(0,100-a);
+      currentAnswer=a+b; currentRemainder=0; symbol='+';
+    }
 
-  if(currentTaskType==='div'){
-    currentAnswer=r(1,10);
-    b=r(1,10);
-    a=currentAnswer*b;
-    currentRemainder=0;
-    symbol='÷';
-  }
+    if(currentTaskType==='sub'){
+      a=r(0,100); b=r(0,a);
+      currentAnswer=a-b; currentRemainder=0; symbol='−';
+    }
 
-  if(currentTaskType==='rest'){
-    b=r(2,10);
-    currentAnswer=r(1,10);
-    currentRemainder=r(1,b-1);
-    a=currentAnswer*b+currentRemainder;
-    symbol='÷';
-  }
+    if(currentTaskType==='div'){
+      currentAnswer=r(1,10);
+      b=r(1,10);
+      a=currentAnswer*b;
+      currentRemainder=0;
+      symbol='÷';
+    }
 
+    if(currentTaskType==='rest'){
+      b=r(2,10);
+      currentAnswer=r(1,10);
+      currentRemainder=r(1,b-1);
+      a=currentAnswer*b+currentRemainder;
+      symbol='÷';
+    }
+
+    taskKey=`${currentTaskType}|${a}|${b}`;
+    tries++;
+  }while(taskKey===lastTaskKey && tries<50);
+
+  lastTaskKey=taskKey;
   $('task').textContent=`${a} ${symbol} ${b} = ?`;
 
   $('answer').value='';
@@ -673,7 +681,7 @@ $('form').addEventListener('submit',e=>{
       return;
     }
 
-    setTimeout(newTask,450);
+    setTimeout(newTask,1100);
     return;
   }
 
@@ -791,11 +799,9 @@ function renderAlbum(){
       const ownedInClub=clubs[club].filter(p=>owned.includes(p.id)).length;
 
       // <details> macht jeden Verein wie ein auf-/zuklappbares Menü.
-      // Vereine mit mindestens einer gesammelten Karte sind standardmäßig offen.
-      // Vereine ohne gesammelte Karte bleiben standardmäßig zugeklappt.
+      // Alle Vereine sind beim Öffnen des Sammelalbums standardmäßig zugeklappt.
       const section=document.createElement('details');
       section.className='club-section';
-      if(ownedInClub>0) section.open=true;
 
       const title=document.createElement('summary');
       title.className='club-title';
