@@ -370,6 +370,30 @@ body.meme67-shake .ipad-tip{
   }
 }
 
+.cancel-training{
+  position:fixed;
+  top:max(14px,env(safe-area-inset-top));
+  right:max(14px,env(safe-area-inset-right));
+  z-index:1400;
+  width:54px;
+  height:54px;
+  padding:0;
+  border-radius:50%;
+  background:#b42318;
+  color:#fff;
+  font-size:30px;
+  line-height:1;
+  box-shadow:0 8px 24px #0005;
+}
+.cancel-training:hover{background:#8f1c13}
+.end-actions{
+  display:flex;
+  justify-content:center;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:14px;
+}
+
 </style>
 </head>
 
@@ -378,6 +402,8 @@ body.meme67-shake .ipad-tip{
   <h1>⚽ Fußball-Mathe-Trainer</h1>
   <p>Aufgaben lösen → Karten sammeln → Album füllen</p>
 </header>
+
+<button type="button" id="cancelTraining" class="cancel-training hidden" aria-label="Übung abbrechen" title="Übung abbrechen">✕</button>
 
 <main>
   <div class="tabs">
@@ -435,11 +461,15 @@ body.meme67-shake .ipad-tip{
       </div>
 
       <div id="sessionEnd" class="session-end hidden">
-        <h2>⏱️ Übungszeit beendet</h2>
+        <h2 id="sessionEndTitle">⏱️ Übungszeit beendet</h2>
         <p>Du hast <strong id="endCorrect">0</strong> Aufgaben richtig gelöst.</p>
         <p>Du hast <strong id="endCards">0</strong> Karten verdient.</p>
+        <p>Trainiert: <strong id="endTime">00:00</strong></p>
         <p class="end-praise">🌟 Super gemacht!</p>
-        <button type="button" id="restartSession">Noch einmal trainieren</button>
+        <div class="end-actions">
+          <button type="button" id="restartSession">🔁 Neu starten</button>
+          <button type="button" id="backHome">🏠 Zum Startbildschirm</button>
+        </div>
       </div>
     </div>
   </section>
@@ -619,6 +649,8 @@ function startTraining(){
   rewardOpen=false;
   $('sessionEnd').classList.add('hidden');
   $('activeTraining').classList.remove('hidden');
+  $('cancelTraining').classList.remove('hidden');
+  $('sessionEndTitle').textContent='⏱️ Übungszeit beendet';
   $('startSession').textContent='Training läuft …';
   $('startSession').disabled=true;
   document.querySelectorAll('.choice-btn,.duration-btn').forEach(b=>b.disabled=true);
@@ -634,15 +666,29 @@ function startTraining(){
   },1000);
 }
 
-function finishTraining(){
-  if(!trainingActive)return;
+function finishTraining(reason='time'){
+  if(!trainingActive && reason!=='cancel')return;
+
   trainingActive=false;
   clearInterval(timerId);
   timerId=null;
+
+  $('rewardOverlay').hidden=true;
+  rewardOpen=false;
+
+  $('cancelTraining').classList.add('hidden');
   $('activeTraining').classList.add('hidden');
   $('sessionEnd').classList.remove('hidden');
+
+  $('sessionEndTitle').textContent=
+    reason==='cancel' ? '⏹️ Übung beendet' : '⏱️ Übungszeit beendet';
+
   $('endCorrect').textContent=totalCorrect;
   $('endCards').textContent=cardsEarned;
+
+  const trainedSeconds=Math.max(0,selectedMinutes*60-secondsLeft);
+  $('endTime').textContent=formatTime(trainedSeconds);
+
   $('startSession').disabled=false;
   $('startSession').textContent='▶ Training starten';
   document.querySelectorAll('.choice-btn,.duration-btn').forEach(b=>b.disabled=false);
@@ -650,6 +696,26 @@ function finishTraining(){
 
 $('startSession').addEventListener('click',startTraining);
 $('restartSession').addEventListener('click',startTraining);
+
+$('cancelTraining').addEventListener('click',()=>{
+  if(!trainingActive && !rewardOpen)return;
+  finishTraining('cancel');
+});
+
+$('backHome').addEventListener('click',()=>{
+  $('sessionEnd').classList.add('hidden');
+  $('activeTraining').classList.add('hidden');
+  $('cancelTraining').classList.add('hidden');
+
+  $('trainer').classList.remove('hidden');
+  $('album').classList.add('hidden');
+  $('trainerTab').classList.add('active');
+  $('albumTab').classList.remove('active');
+
+  $('startSession').disabled=false;
+  $('startSession').textContent='▶ Training starten';
+  document.querySelectorAll('.choice-btn,.duration-btn').forEach(b=>b.disabled=false);
+});
 
 $('form').addEventListener('submit',e=>{
   e.preventDefault();
