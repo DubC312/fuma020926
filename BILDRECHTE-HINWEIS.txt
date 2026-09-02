@@ -1,0 +1,16 @@
+Bildrechte-Sicherheitsmodus
+
+Diese Version zeigt ein Spielerfoto nur, wenn die TheSportsDB-API für das
+Spielerbild im Feld strCreativeCommons eine positive Creative-Commons-
+Kennzeichnung liefert. Andernfalls werden nur die Initialen angezeigt.
+
+Außerdem werden Vereinswappen nicht automatisch eingeblendet.
+
+Wichtig:
+Creative Commons ist nicht eine einzige Lizenz. Je nach konkreter CC-Lizenz
+können Namensnennung, Lizenzlink oder weitere Bedingungen erforderlich sein.
+Vor einer öffentlichen Veröffentlichung sollte deshalb zusätzlich geprüft
+werden, welche konkrete Lizenz und Attribution für die verwendeten Bilder gilt.
+
+Quelle/API: TheSportsDB
+https://www.thesportsdb.com/
