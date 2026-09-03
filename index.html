@@ -769,15 +769,29 @@ $('form').addEventListener('submit',e=>{
 });
 
 async function info(p){
-  let key='fm_info_'+p.id;
+  // Cartoon-URL aus players.json hat immer Vorrang.
+  if(p.cartoon){
+    return {photo:p.cartoon,team:p.club||''};
+  }
+
+  // Neue Cache-Version, damit alte normale Fotos nicht weiterverwendet werden.
+  let key='fm_info_cartoon_v1_'+p.id;
   let cached=localStorage.getItem(key);
   if(cached){
     try{return JSON.parse(cached)}catch(e){}
   }
+
   try{
     let d=await (await fetch(API+encodeURIComponent(p.search||p.name))).json();
     let x=d.player&&d.player[0];
-    let v={photo:x?(x.strCutout||x.strThumb||''):'',team:x?(x.strTeam||''):''};
+
+    // Falls kein Cartoon in players.json vorhanden ist:
+    // normales TheSportsDB-Bild als Fallback.
+    let v={
+      photo:x?(x.strCutout||x.strThumb||''):'',
+      team:x?(x.strTeam||''):''
+    };
+
     localStorage.setItem(key,JSON.stringify(v));
     return v;
   }catch(e){
