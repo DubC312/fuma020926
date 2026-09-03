@@ -1,186 +1,211 @@
 #!/usr/bin/env python3
-"""
-Ermittelt TheSportsDB-Player-Cartoon-Bilder serverseitig.
+from __future__ import annotations
 
-Eingabe/Ausgabe: players.json
-Ergänzt gefundene Spieler um:
-  "sportsdbId": "...",
-  "cartoon": "https://..."
-
-Ein cartoon-Feld wird nur geschrieben, wenn im von TheSportsDB
-gelieferten HTML eine passende Bildadresse gefunden wurde.
-"""
-
-from pathlib import Path
-from urllib.parse import quote, urljoin
 import html as html_lib
 import json
 import re
 import sys
 import time
+import unicodedata
+from collections import defaultdict
+from pathlib import Path
+from urllib.parse import quote, urljoin
 
 import requests
 from bs4 import BeautifulSoup
 
 BASE = "https://www.thesportsdb.com"
-API = BASE + "/api/v1/json/123/searchplayers.php?p="
-ARCHIVE = BASE + "/player_art.php?art=cartoon&p={id}"
-FILE = Path("players.json")
+API_KEY = "123"
+SEARCH_PLAYER = BASE + f"/api/v1/json/{API_KEY}/searchplayers.php?p="
+TEAM_PAGE = BASE + "/team/{team_id}?view=7#playerImages"
+
+API_DELAY_SECONDS = 2.15
+PAGE_DELAY_SECONDS = 0.35
+TIMEOUT = 30
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; FootballMathTrainer/1.0; +GitHub-Actions)"
+    "User-Agent": "Mozilla/5.0 (compatible; FootballMathTrainer-CartoonUpdater/2.0; +https://github.com/)"
 }
 
-TEST_NAMES = {
-    "Erling Haaland",
-    "Kylian Mbappé",
-    "Lionel Messi",
-    "Harry Kane",
-    "Jamal Musiala",
-    "Lamine Yamal",
-    "Cristiano Ronaldo",
-}
+PLAYER_FILE_CANDIDATES = (Path("players.json"), Path("data/players.json"))
 
-def get_json(session, url):
-    r = session.get(url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    return r.json()
 
-def get_text(session, url):
-    r = session.get(url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    return r.text
+def find_player_file():
+    for path in PLAYER_FILE_CANDIDATES:
+        if path.exists():
+            return path
+    print("FEHLER: Weder players.json noch data/players.json gefunden.", file=sys.stderr)
+    raise SystemExit(2)
 
-def normalize_url(value):
+
+def normalize(value):
+    value = value or ""
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = value.casefold()
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def absolute_url(value):
     if not value:
         return ""
-    value = html_lib.unescape(value).strip()
+    value = html_lib.unescape(str(value)).strip()
     if value.startswith("//"):
         return "https:" + value
     return urljoin(BASE + "/", value)
 
-def extract_cartoon_url(page_html):
-    patterns = [
-        r'https?://[^"\']+/images/media/player/cartoon/[^"\'<>\s]+',
-        r'//[^"\']+/images/media/player/cartoon/[^"\'<>\s]+',
-        r'/images/media/player/cartoon/[^"\'<>\s]+',
-    ]
-    for pat in patterns:
-        m = re.search(pat, page_html, flags=re.I)
-        if m:
-            return normalize_url(m.group(0))
 
-    soup = BeautifulSoup(page_html, "html.parser")
-    candidates = []
+def choose_player_result(results, wanted_name):
+    if not results:
+        return None
+    wanted = normalize(wanted_name)
+    exact = [x for x in results if normalize(x.get("strPlayer")) == wanted]
+    if exact:
+        return exact[0]
+    soccer = [x for x in results if normalize(x.get("strSport")) in ("soccer", "football")]
+    return soccer[0] if soccer else results[0]
 
-    for tag in soup.find_all(["img", "source", "a"]):
-        for attr in ("src", "data-src", "data-original", "href", "srcset"):
-            value = tag.get(attr)
-            if not value:
-                continue
-            for part in str(value).split(","):
-                u = part.strip().split(" ")[0]
-                if u:
-                    candidates.append(normalize_url(u))
 
-    for u in candidates:
-        if re.search(r'/player/cartoon/', u, re.I):
-            return u
+def search_player(session, player):
+    query = player.get("search") or player.get("name") or ""
+    if not query:
+        return None
+    try:
+        r = session.get(SEARCH_PLAYER + quote(query), timeout=TIMEOUT)
+        r.raise_for_status()
+        return choose_player_result((r.json().get("player") or []), query)
+    except Exception as exc:
+        print(f"  API-FEHLER bei {player.get('name', query)}: {exc}")
+        return None
+    finally:
+        time.sleep(API_DELAY_SECONDS)
 
-    for u in candidates:
-        if "cartoon" in u.lower() and "/images/media/player/" in u.lower():
-            return u
 
-    return ""
+def parse_team_cartoon_page(session, team_id):
+    try:
+        r = session.get(TEAM_PAGE.format(team_id=team_id), timeout=TIMEOUT)
+        r.raise_for_status()
+    except Exception as exc:
+        print(f"  TEAM-FEHLER {team_id}: {exc}")
+        return {}, 0
+    finally:
+        time.sleep(PAGE_DELAY_SECONDS)
 
-def find_player(session, search):
-    data = get_json(session, API + quote(search))
-    arr = data.get("player") or []
-    return arr[0] if arr else None
+    soup = BeautifulSoup(r.text, "html.parser")
+    found = {}
+    player_links = 0
 
-def write_players(players):
-    with FILE.open("w", encoding="utf-8") as f:
-        f.write("[\n")
-        for i, p in enumerate(players):
-            f.write("  " + json.dumps(p, ensure_ascii=False, separators=(",", ":")))
-            if i < len(players) - 1:
-                f.write(",")
-            f.write("\n")
-        f.write("]\n")
+    for a in soup.find_all("a", href=True):
+        href = str(a.get("href") or "")
+        m = re.search(r"/player/(\d+)(?:-|/|$)", href)
+        if not m:
+            continue
+        player_links += 1
+        player_id = m.group(1)
+
+        for img in a.find_all("img"):
+            for raw in (img.get("src"), img.get("data-src"), img.get("data-original")):
+                u = absolute_url(raw)
+                if "/images/media/player/cartoon/" in u.lower():
+                    found[player_id] = u
+                    break
+            if player_id in found:
+                break
+
+    return found, player_links
+
 
 def main():
-    if not FILE.exists():
-        print("FEHLER: players.json wurde im Hauptverzeichnis nicht gefunden.")
-        print("Lege players.json neben update_cartoons.py ab.")
-        sys.exit(2)
+    path = find_player_file()
+    players = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(players, list):
+        raise SystemExit("FEHLER: players.json muss ein JSON-Array sein.")
 
-    players = json.loads(FILE.read_text(encoding="utf-8"))
+    print("=== TheSportsDB Cartoon-Updater ===")
+    print("Datei:", path)
+    print("Spieler:", len(players))
+
     session = requests.Session()
+    session.headers.update(HEADERS)
 
-    found = 0
-    missing = 0
-    errors = 0
-    test_results = []
+    changed = False
+    team_to_indexes = defaultdict(list)
 
-    for n, p in enumerate(players, start=1):
-        name = p.get("name", "")
-        search = p.get("search") or name
+    print("\n=== 1. SPIELER- UND TEAM-IDs ERMITTELN ===")
+    for i, p in enumerate(players, 1):
+        name = p.get("name") or f"Spieler {i}"
+        print(f"[{i}/{len(players)}] {name}")
+        result = search_player(session, p)
+        if not result:
+            continue
 
-        try:
-            api_player = find_player(session, search)
-            if not api_player:
-                missing += 1
-                if name in TEST_NAMES:
-                    test_results.append((name, "Spieler nicht gefunden", ""))
-                continue
+        pid = str(result.get("idPlayer") or "").strip()
+        tid = str(result.get("idTeam") or "").strip()
 
-            pid = str(api_player.get("idPlayer") or "")
-            if pid:
-                p["sportsdbId"] = pid
+        if pid and str(p.get("sportsdbId") or "") != pid:
+            p["sportsdbId"] = pid
+            changed = True
+        if tid and str(p.get("sportsdbTeamId") or "") != tid:
+            p["sportsdbTeamId"] = tid
+            changed = True
+        if tid:
+            team_to_indexes[tid].append(i - 1)
 
-            if not pid:
-                missing += 1
-                if name in TEST_NAMES:
-                    test_results.append((name, "Keine idPlayer", ""))
-                continue
+        print("  -> Player-ID:", pid or "-", "| Team-ID:", tid or "-", "| Team:", result.get("strTeam") or "-")
 
-            archive_html = get_text(session, ARCHIVE.format(id=pid))
-            cartoon = extract_cartoon_url(archive_html)
+    print("\nEindeutige Teams:", len(team_to_indexes))
+    print("\n=== 2. TEAM-CARTOON-SEITEN LADEN ===")
 
-            if cartoon:
+    team_maps = {}
+    for n, tid in enumerate(sorted(team_to_indexes), 1):
+        print(f"[Team {n}/{len(team_to_indexes)}] {tid}")
+        cmap, link_count = parse_team_cartoon_page(session, tid)
+        team_maps[tid] = cmap
+        print(f"  -> Spieler-Links: {link_count}, Cartoons: {len(cmap)}")
+
+    print("\n=== 3. CARTOONS ZUORDNEN ===")
+    found_count = 0
+    changed_count = 0
+
+    for p in players:
+        name = p.get("name") or "?"
+        pid = str(p.get("sportsdbId") or "").strip()
+        tid = str(p.get("sportsdbTeamId") or "").strip()
+        cartoon = team_maps.get(tid, {}).get(pid, "") if pid and tid else ""
+
+        if cartoon:
+            found_count += 1
+            if p.get("cartoon") != cartoon:
                 p["cartoon"] = cartoon
-                found += 1
-                if name in TEST_NAMES:
-                    test_results.append((name, "OK", cartoon))
+                changed = True
+                changed_count += 1
+                print(f"✓ {name}: {cartoon}")
             else:
-                p.pop("cartoon", None)
-                missing += 1
-                if name in TEST_NAMES:
-                    test_results.append((name, "Kein Cartoon im Archiv gefunden", ""))
+                print(f"= {name}: unverändert")
+        else:
+            if p.get("cartoon"):
+                print(f"~ {name}: aktuell nicht gefunden; vorhandene URL bleibt erhalten")
+            else:
+                print(f"– {name}: kein Cartoon gefunden")
 
-        except Exception as e:
-            errors += 1
-            if name in TEST_NAMES:
-                test_results.append((name, f"FEHLER: {type(e).__name__}: {e}", ""))
+    if changed:
+        path.write_text(json.dumps(players, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-        time.sleep(2.1)
+    print("\n=== ERGEBNIS ===")
+    print("Spieler mit aktuell gefundenem Cartoon:", found_count)
+    print("Cartoon-Felder neu/geändert:", changed_count)
+    print("players.json geändert:", "JA" if changed else "NEIN")
 
-        if n % 25 == 0:
-            print(f"{n}/{len(players)} verarbeitet ...")
+    print("\n=== HAALAND-KONTROLLE ===")
+    h = next((p for p in players if normalize(p.get("name")) == normalize("Erling Haaland")), None)
+    if h:
+        print("sportsdbId:", h.get("sportsdbId", "-"))
+        print("sportsdbTeamId:", h.get("sportsdbTeamId", "-"))
+        print("cartoon:", h.get("cartoon", "-"))
+    else:
+        print("Erling Haaland nicht gefunden.")
 
-    write_players(players)
-
-    print("\n=== 7 TESTSPIELER ===")
-    for name, status, url in test_results:
-        print(f"{name}: {status}")
-        if url:
-            print(f"  {url}")
-
-    print("\n=== GESAMT ===")
-    print(f"Cartoons gefunden: {found}")
-    print(f"Ohne Cartoon/Treffer: {missing}")
-    print(f"Fehler: {errors}")
-    print(f"Gesamt: {len(players)}")
 
 if __name__ == "__main__":
     main()
