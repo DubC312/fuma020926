@@ -1,0 +1,47 @@
+name: TheSportsDB Cartoons aktualisieren
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: thesportsdb-cartoon-update
+  cancel-in-progress: false
+
+jobs:
+  update-cartoons:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v5
+
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Abhängigkeiten installieren
+        run: pip install requests beautifulsoup4
+
+      - name: Cartoon-Bilder ermitteln
+        run: python update_cartoons.py
+
+      - name: Änderungen speichern
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Keine Änderungen."
+            exit 0
+          fi
+
+          git commit -m "Update TheSportsDB player cartoons"
+          git push
