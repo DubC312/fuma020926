@@ -1,0 +1,23 @@
+name: Haaland Cartoon Debug
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-haaland:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhängigkeiten installieren
+        run: pip install requests beautifulsoup4
+
+      - name: Haaland Cartoon untersuchen
+        run: python debug_haaland_cartoon.py
