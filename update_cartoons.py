@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """
 Ermittelt TheSportsDB-Player-Cartoon-Bilder serverseitig.
-Warum serverseitig? Browser/GitHub Pages werden beim Auslesen der
-TheSportsDB-Archivseiten durch CORS blockiert.
 
-Eingabe:  players-cartoon.json
-Ausgabe:  dieselbe Datei, ergänzt um:
+Eingabe/Ausgabe: players.json
+Ergänzt gefundene Spieler um:
   "sportsdbId": "...",
-  "cartoon": "https://www.thesportsdb.com/images/media/player/cartoon/..."
+  "cartoon": "https://..."
 
-Das Skript erfindet KEINE Bild-URLs. Ein cartoon-Feld wird nur geschrieben,
-wenn im von TheSportsDB gelieferten Archiv-HTML eine passende Bildadresse
-gefunden wurde.
+Ein cartoon-Feld wird nur geschrieben, wenn im von TheSportsDB
+gelieferten HTML eine passende Bildadresse gefunden wurde.
 """
 
 from pathlib import Path
@@ -28,10 +25,10 @@ from bs4 import BeautifulSoup
 BASE = "https://www.thesportsdb.com"
 API = BASE + "/api/v1/json/123/searchplayers.php?p="
 ARCHIVE = BASE + "/player_art.php?art=cartoon&p={id}"
-FILE = Path("players-cartoon.json")
+FILE = Path("players.json")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; FootballMathTrainer/1.0; +GitHub-Pages)"
+    "User-Agent": "Mozilla/5.0 (compatible; FootballMathTrainer/1.0; +GitHub-Actions)"
 }
 
 TEST_NAMES = {
@@ -63,7 +60,6 @@ def normalize_url(value):
     return urljoin(BASE + "/", value)
 
 def extract_cartoon_url(page_html):
-    # 1. Bevorzugt exakt das erwartete Medienverzeichnis.
     patterns = [
         r'https?://[^"\']+/images/media/player/cartoon/[^"\'<>\s]+',
         r'//[^"\']+/images/media/player/cartoon/[^"\'<>\s]+',
@@ -75,27 +71,22 @@ def extract_cartoon_url(page_html):
             return normalize_url(m.group(0))
 
     soup = BeautifulSoup(page_html, "html.parser")
-
-    # 2. Alle img/source/a-URLs prüfen.
     candidates = []
+
     for tag in soup.find_all(["img", "source", "a"]):
         for attr in ("src", "data-src", "data-original", "href", "srcset"):
             value = tag.get(attr)
             if not value:
                 continue
-            # srcset kann mehrere Varianten enthalten.
             for part in str(value).split(","):
                 u = part.strip().split(" ")[0]
                 if u:
                     candidates.append(normalize_url(u))
 
-    # Streng: zuerst nur explizit "cartoon".
     for u in candidates:
         if re.search(r'/player/cartoon/', u, re.I):
             return u
 
-    # 3. Falls TheSportsDB den Ordner später umbenennt:
-    # Nur Bilder akzeptieren, deren URL selbst "cartoon" enthält.
     for u in candidates:
         if "cartoon" in u.lower() and "/images/media/player/" in u.lower():
             return u
@@ -112,14 +103,15 @@ def write_players(players):
         f.write("[\n")
         for i, p in enumerate(players):
             f.write("  " + json.dumps(p, ensure_ascii=False, separators=(",", ":")))
-            if i < len(players)-1:
+            if i < len(players) - 1:
                 f.write(",")
             f.write("\n")
         f.write("]\n")
 
 def main():
     if not FILE.exists():
-        print(f"FEHLER: {FILE} nicht gefunden.")
+        print("FEHLER: players.json wurde im Hauptverzeichnis nicht gefunden.")
+        print("Lege players.json neben update_cartoons.py ab.")
         sys.exit(2)
 
     players = json.loads(FILE.read_text(encoding="utf-8"))
@@ -171,7 +163,6 @@ def main():
             if name in TEST_NAMES:
                 test_results.append((name, f"FEHLER: {type(e).__name__}: {e}", ""))
 
-        # Rücksicht auf die freie API.
         time.sleep(2.1)
 
         if n % 25 == 0:
