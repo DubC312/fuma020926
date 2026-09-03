@@ -234,6 +234,35 @@ button.active{background:var(--green-deep);box-shadow:0 0 0 3px #fff8 inset}
   padding:14px;
 }
 
+/* Noch nicht gesammelte Karten: echte Karte ausgegraut anzeigen */
+.locked-card-wrap{
+  position:relative;
+  border-radius:22px;
+  overflow:hidden;
+}
+
+.locked-card-wrap .card{
+  filter:grayscale(1);
+  opacity:.42;
+}
+
+.locked-card-wrap::after{
+  content:"🔒 Noch nicht gesammelt";
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  text-align:center;
+  font-weight:900;
+  font-size:1.05rem;
+  color:#fff;
+  background:rgba(9,47,32,.38);
+  text-shadow:0 2px 5px #0008;
+  pointer-events:none;
+}
+
 .reward-overlay{
   position:fixed;
   inset:0;
@@ -902,10 +931,10 @@ function renderAlbum(){
             // Name und vollständige Karte erst anzeigen, wenn sie gesammelt wurde.
             grid.appendChild(card(p));
           }else{
-            const d=document.createElement('div');
-            d.className='locked';
-            d.innerHTML=`🔒<br><strong>Noch nicht gesammelt</strong>`;
-            grid.appendChild(d);
+            const wrap=document.createElement('div');
+            wrap.className='locked-card-wrap';
+            wrap.appendChild(card(p));
+            grid.appendChild(wrap);
           }
         });
 
